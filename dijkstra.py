@@ -6,9 +6,11 @@ of turns it takes to enter the destination zone (1 for normal/priority,
 are broken in favour of paths that cross more priority zones, as the
 subject asks.
 
-`find_paths` extracts several routes: after each shortest path is found,
-the remaining capacity of its links is decreased, so the next search
-naturally avoids saturated links and discovers alternative routes.
+`find_paths` extracts several routes. After each path is found, its
+links get a usage mark; a link used beyond its capacity costs extra
+turns in the next search, so later routes prefer fresh links but may
+still share unavoidable ones (a capacity-1 link still carries one drone
+per turn - the simulation enforces the real per-turn limits).
 """
 
 from __future__ import annotations
@@ -31,12 +33,15 @@ class PathResult:
 class Dijkstra:
     """Finds shortest routes from start to end, respecting zone types."""
 
+    CONGESTION_PENALTY = 3  # extra search turns per over-capacity reuse
+
     def __init__(self, data: MapData) -> None:
         self.data = data
-        self.remaining: Dict[Edge, int] = {
+        self.capacity: Dict[Edge, int] = {
             frozenset((c.zone1, c.zone2)): c.max_link_capacity
             for c in data.connections
         }
+        self.usage: Dict[Edge, int] = {}
         self.neighbours: Dict[str, List[str]] = {
             name: [] for name in data.hubs
         }
@@ -52,41 +57,54 @@ class Dijkstra:
     def _shortest_path(self, start: str, end: str) -> Optional[PathResult]:
         """One Dijkstra run over links that still have capacity left.
 
-        The heap is ordered by (turns, non_priority_count) so that among
-        equally fast routes, the one crossing more priority zones wins.
+        The heap is ordered by (search cost, non_priority_count): the
+        search cost is the real turn cost plus a congestion penalty for
+        links already claimed by earlier paths, and among equally cheap
+        routes the one crossing more priority zones wins.
         """
-        heap: List[Tuple[int, int, List[str]]] = [(0, 0, [start])]
+        heap: List[Tuple[int, int, int, List[str]]] = [(0, 0, 0, [start])]
         best: Dict[str, Tuple[int, int]] = {start: (0, 0)}
 
         while heap:
-            cost, non_prio, path = heapq.heappop(heap)
+            search_cost, non_prio, cost, path = heapq.heappop(heap)
             current = path[-1]
             if current == end:
                 return PathResult(zones=path, cost=cost)
-            if best.get(current, (cost, non_prio)) < (cost, non_prio):
+            if best.get(current, (search_cost, non_prio)) < (search_cost,
+                                                             non_prio):
                 continue
 
             for nxt in self.neighbours[current]:
                 hub = self.data.hubs[nxt]
                 if hub.zone_type == "blocked":
                     continue
-                if self.remaining.get(frozenset((current, nxt)), 0) <= 0:
-                    continue
-                key = (cost + self._step_cost(hub),
+                link = frozenset((current, nxt))
+                overuse = max(
+                    0,
+                    self.usage.get(link, 0) + 1 - self.capacity.get(link, 1),
+                )
+                step = self._step_cost(hub)
+                key = (search_cost + step + overuse * self.CONGESTION_PENALTY,
                        non_prio + (0 if hub.zone_type == "priority" else 1))
                 if key < best.get(nxt, (1 << 30, 0)):
                     best[nxt] = key
-                    heapq.heappush(heap, (key[0], key[1], path + [nxt]))
+                    heapq.heappush(
+                        heap, (key[0], key[1], cost + step, path + [nxt])
+                    )
         return None
 
     def find_paths(self, start: str, end: str) -> List[PathResult]:
-        """Extract routes until links saturate (one per drone at most)."""
+        """Extract distinct routes (at most one per drone), stopping as
+        soon as the search only rediscovers an already known route."""
         paths: List[PathResult] = []
+        seen: set[Tuple[str, ...]] = set()
         while len(paths) < self.data.nb_drones:
             result = self._shortest_path(start, end)
-            if result is None:
+            if result is None or tuple(result.zones) in seen:
                 break
+            seen.add(tuple(result.zones))
             paths.append(result)
             for a, b in zip(result.zones, result.zones[1:]):
-                self.remaining[frozenset((a, b))] -= 1
+                link = frozenset((a, b))
+                self.usage[link] = self.usage.get(link, 0) + 1
         return paths

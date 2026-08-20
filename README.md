@@ -25,7 +25,7 @@ Requires Python 3.10+. Only the standard library is used at runtime;
 ```sh
 make install                 # pip install flake8 + mypy
 make run MAP=maps/easy/01_linear_path.txt
-make debug MAP=map.txt       # run under pdb
+make debug MAP=maps/easy/01_linear_path.txt   # run under pdb
 make lint                    # flake8 + mypy with the subject's flags
 make lint-strict             # flake8 + mypy --strict
 make clean                   # remove caches
@@ -52,21 +52,23 @@ Input (`maps/easy/01_linear_path.txt`):
 
 ```
 nb_drones: 2
+
 start_hub: start 0 0 [color=green]
-end_hub: goal 3 0 [color=yellow]
-hub: mid1 1 0 [color=blue]
-hub: mid2 2 0 [color=blue]
-connection: start-mid1
-connection: mid1-mid2
-connection: mid2-goal
+hub: waypoint1 1 0 [color=blue]
+hub: waypoint2 2 0 [color=blue]
+end_hub: goal 3 0 [color=red]
+
+connection: start-waypoint1
+connection: waypoint1-waypoint2
+connection: waypoint2-goal
 ```
 
 Output (`python3 main.py --quiet maps/easy/01_linear_path.txt`):
 
 ```
-D1-mid1
-D1-mid2 D2-mid1
-D1-goal D2-mid2
+D1-waypoint1
+D1-waypoint2 D2-waypoint1
+D1-goal D2-waypoint2
 D2-goal
 ```
 
@@ -92,10 +94,11 @@ priority queue is ordered lexicographically by
 `(turns, number of non-priority zones)`, so among equally fast routes
 the one crossing more priority zones wins — this is how priority zones
 are "preferred in pathfinding". Several routes are extracted by
-re-running Dijkstra after decrementing the remaining capacity of each
-link used by the previous path; searches naturally avoid saturated
-links, yielding capacity-aware, mostly disjoint routes. Extraction
-stops when no route remains or there is one route per drone.
+re-running Dijkstra with a small congestion penalty on links already
+claimed by earlier paths: later searches prefer fresh links but may
+still share unavoidable ones (a capacity-1 link is not "used up" - it
+still carries one drone per turn). Extraction stops when the search
+only rediscovers a known route.
 Complexity: one run is O(E log V); extracting k paths is O(k·E log V).
 
 **3. Scheduling (`simulation.py`).** Drones are distributed over the
@@ -128,9 +131,10 @@ targets):
 | hard/capacity hell | 12 | 16 | ≤ 35 |
 | hard/ultimate challenge | 15 | 26 | ≤ 45 |
 
-The challenger map is solved legally but above the 45-turn record (67 turns): its
-routes all funnel through restricted capacity-1 gates, which caps the
-throughput of any routing strategy. That level is optional.
+The challenger map (The Impossible Dream, 25 drones) is solved in
+**44 turns, beating the 45-turn reference record**. The theoretical
+floor is 43: the single capacity-1 exit from the start zone serializes
+departures (25 turns) and the shortest route needs 18 more.
 
 ## Visual representation
 

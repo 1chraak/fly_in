@@ -16,7 +16,7 @@ import sys
 from dijkstra import Dijkstra
 from parser import Parser, ParserError
 from simulation import Simulation
-from visual import render
+from visual import Visualizer
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -43,23 +43,32 @@ def main() -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    assert data.start is not None and data.end is not None
+    if data.start is None or data.end is None:
+        print("Error: map has no start_hub or no end_hub", file=sys.stderr)
+        return 1
+
     paths = Dijkstra(data).find_paths(data.start, data.end)
     if not paths:
         print("Error: no valid path from start_hub to end_hub",
               file=sys.stderr)
         return 1
 
-    turns = Simulation(data, paths).run()
-    show_board = sys.stdout.isatty() and not args.quiet
-    render(data, turns, board=show_board,
-           capacity_info=args.capacity_info,
-           use_color=sys.stdout.isatty() and not args.no_color)
+    turns = Simulation.best_schedule(data, paths)
+    on_terminal = sys.stdout.isatty()
+    viz = Visualizer(data, use_color=on_terminal and not args.no_color)
+    viz.render(turns, board=on_terminal and not args.quiet,
+               capacity_info=args.capacity_info)
     return 0
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except BrokenPipeError:  # e.g. output piped into `head`
+    except BrokenPipeError:  # output piped into e.g. `head`
         sys.exit(0)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:  # never end on a traceback
+        print(f"Error: unexpected failure: {exc}", file=sys.stderr)
+        sys.exit(1)

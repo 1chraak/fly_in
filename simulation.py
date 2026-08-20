@@ -72,19 +72,30 @@ class Simulation:
 
     def _assign_paths(self, paths: List[PathResult]) -> List[int]:
         """Spread drones over paths so the last arrival is as early as
-        possible: each drone picks the path with the lowest estimated
-        finish time (path cost + queueing delay behind drones already
-        assigned, given the path's per-turn throughput)."""
+        possible: each path gets a quota based on estimated finish time
+        (path cost + queueing delay behind drones already assigned).
+        Launch slots are then filled from the last one backward: the
+        final launches take the shortest routes, alternating between
+        routes so shared bottlenecks are fed evenly, and the longest
+        routes launch first, where waiting costs nothing."""
         throughput = [self._throughput(p) for p in paths]
-        assigned = [0] * len(paths)
-        choice: List[int] = []
+        quota = [0] * len(paths)
         for _ in range(self.data.nb_drones):
             best = min(
                 range(len(paths)),
-                key=lambda p: paths[p].cost + assigned[p] // throughput[p],
+                key=lambda p: paths[p].cost + quota[p] // throughput[p],
             )
-            choice.append(best)
-            assigned[best] += 1
+            quota[best] += 1
+        by_cost = sorted(range(len(paths)), key=lambda p: paths[p].cost)
+        choice: List[int] = []
+        prev = -1
+        for _ in range(self.data.nb_drones):  # last launch slot first
+            left = [p for p in by_cost if quota[p] > 0]
+            pick = next((p for p in left if p != prev), left[0])
+            quota[pick] -= 1
+            choice.append(pick)
+            prev = pick
+        choice.reverse()
         return choice
 
     def _throughput(self, path: PathResult) -> int:
@@ -103,6 +114,24 @@ class Simulation:
         for zone in path.zones[1:-1]:
             rate = min(rate, self.data.hubs[zone].max_drones or 1)
         return max(1, rate)
+
+    @classmethod
+    def best_schedule(
+        cls, data: MapData, paths: List[PathResult]
+    ) -> List[TurnReport]:
+        """Simulate with the 1..n best routes, keep the shortest run.
+
+        Routes share links (e.g. a single exit from the start zone), so
+        one more route does not always add throughput - it may only put
+        slow drones into valuable launch slots. Simulations are cheap,
+        so we measure which route count wins instead of predicting it.
+        """
+        best = cls(data, paths[:1]).run()
+        for count in range(2, len(paths) + 1):
+            candidate = cls(data, paths[:count]).run()
+            if len(candidate) < len(best):
+                best = candidate
+        return best
 
     def run(self) -> List[TurnReport]:
         turns: List[TurnReport] = []

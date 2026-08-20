@@ -72,22 +72,19 @@ class Visualizer:
         print(f"# total moves: {total_moves}")
         print(f"# average turns per drone: {total_moves / max(1, drones):.1f}")
 
-
-def render(
-    data: MapData,
-    turns: List[TurnReport],
-    *,
-    board: bool,
-    capacity_info: bool,
-    use_color: bool,
-) -> None:
-    """Print the full simulation: canonical lines plus optional extras."""
-    viz = Visualizer(data, use_color)
-    for number, report in enumerate(turns, start=1):
-        print(" ".join(report.moves))
-        if capacity_info:
-            viz.print_capacity_info(report)
+    def render(
+        self,
+        turns: List[TurnReport],
+        *,
+        board: bool,
+        capacity_info: bool,
+    ) -> None:
+        """Print the whole run: canonical lines plus the optional extras."""
+        for number, report in enumerate(turns, start=1):
+            print(" ".join(report.moves))
+            if capacity_info:
+                self.print_capacity_info(report)
+            if board:
+                self.print_board(number, report)
         if board:
-            viz.print_board(number, report)
-    if board:
-        viz.print_summary(turns)
+            self.print_summary(turns)

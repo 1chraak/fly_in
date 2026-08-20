@@ -118,11 +118,20 @@ class Parser:
         return end in visited
 
     def _read_file(self) -> None:
-        with open(self.file_name, "r", encoding="utf-8") as handle:
-            for index, line in enumerate(handle, start=1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
+        """Load the non-empty, non-comment lines with their line numbers.
+
+        ``utf-8-sig`` transparently drops a byte-order mark; a file that
+        is not valid UTF-8 text is reported as a parse error rather than
+        crashing the program.
+        """
+        try:
+            with open(self.file_name, "r", encoding="utf-8-sig") as handle:
+                numbered = list(enumerate(handle, start=1))
+        except UnicodeDecodeError:
+            raise ParserError(0, "file is not valid UTF-8 text") from None
+        for index, line in numbered:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
                 self.lines.append((index, line))
 
     @staticmethod
